@@ -7,13 +7,27 @@ namespace ALittleBB.StateMachines
     /// <summary>
     /// Holds a stack of <see cref="StateId"/> and runs the <see cref="IState"/> registered for each.
     /// The top of the stack is the current state; the states underneath are paused.
+    /// <para><see cref="Switch"/>, <see cref="Push"/> and <see cref="Pop"/> called from outside a transition finish
+    /// before they return. Called while a transition is running (inside <see cref="IState.Enter"/>,
+    /// <see cref="IState.Exit"/>, <see cref="Changed"/> or a callback of <see cref="Subscribe"/>) they only queue
+    /// the request and return: the running transition first tells every listener, then the queued requests run
+    /// one by one in the order they were made.</para>
     /// </summary>
     public class StateMachine
     {
+        /// <summary>
+        /// How many requests one outside call may run (itself plus everything queued behind it, counting requests
+        /// that end up doing nothing). When more are still queued, an error is logged and they are dropped,
+        /// so states that keep switching to each other cannot hang the game.
+        /// </summary>
+        public const int MaxTransitionsPerRun = 64;
+
         readonly Dictionary<StateId, IState> _states = new Dictionary<StateId, IState>();
         readonly List<StateId> _stack = new List<StateId>();
         readonly IReadOnlyList<StateId> _readOnlyStack;
         readonly List<StateSubscription> _subscriptions = new List<StateSubscription>();
+        readonly Queue<Request> _requests = new Queue<Request>();
+        bool _isRunning;
         int _sendDepth;
         bool _hasDisposedSubscriptions;
 
@@ -61,7 +75,8 @@ namespace ALittleBB.StateMachines
         /// every listener whatever its status — each step in subscribe order.</para>
         /// <para>The listener is synced with the stack before this method returns: <paramref name="onEnter"/> is called
         /// right away when a state of the set is already on the stack, followed by <paramref name="onPaused"/> when
-        /// that state is not the top.</para>
+        /// that state is not the top. A transition requested inside those two callbacks runs after both,
+        /// still before this method returns.</para>
         /// </summary>
         /// <returns>The subscription; dispose it to unsubscribe.</returns>
         public StateSubscription Subscribe(
@@ -77,7 +92,11 @@ namespace ALittleBB.StateMachines
 
             var subscription = new StateSubscription(this, states, onEnter, onExit, onPaused, onResumed, onChanged);
             _subscriptions.Add(subscription);
-            subscription.Arrive(_stack);
+            if (_isRunning)
+                subscription.Arrive(_stack);
+            else
+                Run(subscription);
+
             return subscription;
         }
 
@@ -85,7 +104,77 @@ namespace ALittleBB.StateMachines
         /// Exits every state on the stack from top to bottom, enters <paramref name="id"/> as the only state
         /// and sends one <see cref="Changed"/>. Does nothing when <paramref name="id"/> is already the current state.
         /// </summary>
-        public void Switch(StateId id)
+        public void Switch(StateId id) => Enqueue(StateChangeKind.Switch, id);
+
+        /// <summary>
+        /// Enters <paramref name="id"/> on top of the current state without exiting it (it is paused)
+        /// and sends <see cref="Changed"/>. A state can be on the stack only once.
+        /// </summary>
+        public void Push(StateId id) => Enqueue(StateChangeKind.Push, id);
+
+        /// <summary>
+        /// Exits the current state and goes back to the state underneath without entering it again
+        /// (it is resumed), then sends <see cref="Changed"/>. The last state cannot be popped.
+        /// </summary>
+        public void Pop() => Enqueue(StateChangeKind.Pop, null);
+
+        void Enqueue(StateChangeKind kind, StateId id)
+        {
+            _requests.Enqueue(new Request(kind, id));
+            if (!_isRunning)
+                Run();
+        }
+
+        /// <summary>
+        /// Syncs <paramref name="newcomer"/> with the stack (when a listener was just subscribed), then runs the
+        /// queued requests one by one. Whatever they request in turn is queued behind them and run here too.
+        /// A request is checked against the stack when its turn comes, exactly like a call from outside.
+        /// </summary>
+        void Run(StateSubscription newcomer = null)
+        {
+            _isRunning = true;
+            try
+            {
+                newcomer?.Arrive(_stack);
+
+                int ran = 0;
+                while (_requests.Count > 0)
+                {
+                    if (ran == MaxTransitionsPerRun)
+                    {
+                        Debug.LogError(
+                            $"StateMachine: stopped after {MaxTransitionsPerRun} transitions in one run. A state or listener " +
+                            "keeps requesting a transition from inside a transition. " +
+                            $"Current state: '{(Current != null ? Current.name : "none")}'. " +
+                            $"Queued requests dropped: {_requests.Count}.");
+                        break;
+                    }
+
+                    ran++;
+                    Request request = _requests.Dequeue();
+                    switch (request.Kind)
+                    {
+                        case StateChangeKind.Switch:
+                            RunSwitch(request.Id);
+                            break;
+                        case StateChangeKind.Push:
+                            RunPush(request.Id);
+                            break;
+                        case StateChangeKind.Pop:
+                            RunPop();
+                            break;
+                    }
+                }
+            }
+            finally
+            {
+                // After the limit or an exception: what is left must not run later, behind an unrelated call.
+                _requests.Clear();
+                _isRunning = false;
+            }
+        }
+
+        void RunSwitch(StateId id)
         {
             if (id == null)
             {
@@ -104,11 +193,7 @@ namespace ALittleBB.StateMachines
             Send(new StateChanged(from, id, StateChangeKind.Switch));
         }
 
-        /// <summary>
-        /// Enters <paramref name="id"/> on top of the current state without exiting it (it is paused)
-        /// and sends <see cref="Changed"/>. A state can be on the stack only once.
-        /// </summary>
-        public void Push(StateId id)
+        void RunPush(StateId id)
         {
             if (id == null)
             {
@@ -127,11 +212,7 @@ namespace ALittleBB.StateMachines
             Send(new StateChanged(from, id, StateChangeKind.Push));
         }
 
-        /// <summary>
-        /// Exits the current state and goes back to the state underneath without entering it again
-        /// (it is resumed), then sends <see cref="Changed"/>. The last state cannot be popped.
-        /// </summary>
-        public void Pop()
+        void RunPop()
         {
             if (_stack.Count == 0)
             {
@@ -203,6 +284,19 @@ namespace ALittleBB.StateMachines
                 state.Exit();
 
             _stack.RemoveAt(top);
+        }
+
+        /// <summary>A Switch, Push or Pop waiting for its turn.</summary>
+        readonly struct Request
+        {
+            public readonly StateChangeKind Kind;
+            public readonly StateId Id;
+
+            public Request(StateChangeKind kind, StateId id)
+            {
+                Kind = kind;
+                Id = id;
+            }
         }
     }
 }
