@@ -1,0 +1,15 @@
+{
+  "name": "com.alittlebb.statemachine",
+  "version": "0.1.0",
+  "displayName": "ALittleBB State Machine",
+  "description": "State machine module: ScriptableObject state ids, Enter/Exit states, Switch and Push/Pop transitions with listener signals.",
+  "unity": "6000.0",
+  "keywords": [
+    "state machine",
+    "state",
+    "fsm"
+  ],
+  "author": {
+    "name": "ALittleBB"
+  }
+}
