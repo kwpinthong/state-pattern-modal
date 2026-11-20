@@ -4,6 +4,8 @@
     "references": [
         "ALittleBB.StateMachines",
         "ALittleBB.StateMachines.Editor",
+        "ALittleBB.StateMachines.Tests.PlayMode",
+        "UnityEngine.UI",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],
