@@ -244,14 +244,41 @@ namespace ALittleBB.StateMachines.Tests
             AssertMatch(section, @"(?i)package does not", "the Audio section: the package does not keep the music across scenes itself");
         }
 
+        // GEN-018 C8 replaces GEN017_Q005_Readme_AudioSection_SaysTheSnapshotFollowsTheMixersUpdateMode: a snapshot
+        // transition no longer follows the mixer's Update Mode, the binding's Time Scale decides (Q-005 of the sheet).
+
         [Test]
-        public void GEN017_Q005_Readme_AudioSection_SaysTheSnapshotFollowsTheMixersUpdateMode()
+        public void GEN018_C8_Readme_AudioSection_ExplainsTheTwoTimeScalesOfASnapshotTransition()
         {
             string section = Section(@"StateAudioBinding");
 
-            Assert.That(section, Does.Contain("**Update Mode**"), "the Audio section: the Audio Mixer's Update Mode");
-            Assert.That(section, Does.Contain("Unscaled Time"), "the Audio section: set the mixer to Unscaled Time when the game pauses time");
-            AssertMatch(section, @"(?i)Normal[^.\n]*`Time\.timeScale` is 0", "the Audio section: a mixer in Normal mode stands still while Time.timeScale is 0");
+            Assert.That(section, Does.Contain("**Time Scale**"), "the Audio section: the field as the Inspector names it");
+            foreach (StateAudioTimeScale choice in System.Enum.GetValues(typeof(StateAudioTimeScale)))
+                Assert.That(section, Does.Contain(ObjectNames.NicifyVariableName(choice.ToString())), "the Audio section: every choice, as the Inspector names it");
+
+            AssertMatch(section, @"(?i)Ignore Time Scale[^.\n]*default|default[^.\n]*Ignore Time Scale", "the Audio section: Ignore Time Scale is the default");
+            AssertMatch(section, @"(?i)Ignore Time Scale[^\n]*real time", "the Audio section: Ignore runs on real time");
+            AssertMatch(section, @"(?i)Follow Time Scale[^\n]*`Time\.timeScale`", "the Audio section: Follow is slowed by Time.timeScale");
+            AssertMatch(section, @"(?i)whatever the[^.\n]*\*\*Update Mode\*\*", "the Audio section: the mixer's own Update Mode does not matter");
+        }
+
+        [Test]
+        public void GEN018_C8_Readme_AudioSection_NoLongerSaysTheSnapshotFollowsTheMixersUpdateMode()
+        {
+            string section = Section(@"StateAudioBinding");
+
+            Assert.That(section, Does.Not.Contain("Snapshots follow the Audio Mixer's Update Mode"), "the GEN-017 heading");
+            AssertNoMatch(section, @"(?i)set the mixer's \*\*Update Mode\*\*", "the GEN-017 advice to set the mixer to Unscaled Time");
+            AssertNoMatch(section, @"(?i)Normal\*\*, the default, the transition stands still", "the GEN-017 description of a Normal mixer");
+        }
+
+        [Test]
+        public void GEN018_C8_Readme_AudioSection_SaysTheSnapshotTransitionEndsAtOnceWhenTheComponentIsDisabled()
+        {
+            string section = Section(@"StateAudioBinding");
+
+            AssertMatch(section, @"(?i)disabl[^.\n]*snapshot transition[^.\n]*ends at once|snapshot transition[^.\n]*ends at once[^.\n]*disabl",
+                "the Audio section: a snapshot transition under way ends at its snapshot when the component is disabled or destroyed");
         }
 
         [Test]
@@ -266,6 +293,11 @@ namespace ALittleBB.StateMachines.Tests
         static void AssertMatch(string section, string pattern, string what)
         {
             Assert.That(Regex.IsMatch(section, pattern), Is.True, $"{what} (/{pattern}/)");
+        }
+
+        static void AssertNoMatch(string section, string pattern, string what)
+        {
+            Assert.That(Regex.IsMatch(section, pattern), Is.False, $"{what} (/{pattern}/)");
         }
 
         /// <summary>The first section whose heading matches the pattern: its heading and everything under it.</summary>

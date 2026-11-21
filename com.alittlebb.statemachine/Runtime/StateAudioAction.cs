@@ -14,9 +14,9 @@ namespace ALittleBB.StateMachines
 
         /// <summary>
         /// Moves the Audio Mixer to the binding's Snapshot over the binding's Seconds
-        /// (<see cref="UnityEngine.Audio.AudioMixerSnapshot.TransitionTo"/>). The mixer's own Update Mode sets the
-        /// clock: Normal follows Time.timeScale (it stands still at 0), Unscaled Time does not. 0 changes it on the
-        /// next frame. It does not need the BGM Audio Source.
+        /// (<see cref="UnityEngine.Audio.AudioMixerSnapshot.TransitionTo"/>), on the clock of the binding's Time Scale
+        /// (<see cref="StateAudioTimeScale"/>), whatever the mixer's Update Mode. 0 changes it on the next frame.
+        /// It does not need the BGM Audio Source.
         /// </summary>
         TransitionToSnapshot = 2,
     }

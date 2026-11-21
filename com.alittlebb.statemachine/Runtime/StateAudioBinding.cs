@@ -38,9 +38,11 @@ namespace ALittleBB.StateMachines
     /// does nothing; the other bindings still work. Without a host, one warning is logged and nothing is played.</para>
     /// <para>Transition To Snapshot moves the Audio Mixer of its Snapshot to that snapshot over Seconds, and needs no
     /// Audio Source: a Paused binding can muffle the music while a panel is pushed on top, and a Resumed binding
-    /// bring it back on Pop. The transition is the mixer's own: its Update Mode decides whether Time.timeScale slows
-    /// it (Normal, the default: it stands still while Time.timeScale is 0) or not (Unscaled Time). A transition
-    /// never holds a state change, and a new one starts from where the mixer is.</para>
+    /// bring it back on Pop. The binding's Time Scale sets the clock, whatever the Update Mode of the mixer: Ignore
+    /// Time Scale (the default) runs on real time like the BGM fades, Follow Time Scale on game time (Time.timeScale
+    /// slows it, and it stands still at 0). While it runs, the mixer's Update Mode is set to match and put back when
+    /// it ends. A transition never holds a state change, and a new one starts from where the mixer is. Disabling or
+    /// destroying the component ends its snapshot transition at once on its snapshot.</para>
     /// <para><see cref="Host"/> and the states of <see cref="Bindings"/> are read each time the component is
     /// enabled.</para>
     /// </summary>
@@ -66,8 +68,11 @@ namespace ALittleBB.StateMachines
             [Tooltip("Snapshot for Transition To Snapshot.")]
             [SerializeField] AudioMixerSnapshot _snapshot;
 
-            [Tooltip("Crossfade of Play Bgm, fade out of Stop Bgm, or length of Transition To Snapshot, in seconds. Bgm fades use real time (Time.timeScale does not slow them); a snapshot transition follows the Audio Mixer's Update Mode. 0 changes at once.")]
+            [Tooltip("Crossfade of Play Bgm, fade out of Stop Bgm, or length of Transition To Snapshot, in seconds. Bgm fades use real time (Time.timeScale does not slow them); a snapshot transition runs on the clock set by Time Scale. 0 changes at once.")]
             [SerializeField, Min(0f)] float _seconds;
+
+            [Tooltip("Clock of Transition To Snapshot, whatever the Update Mode of the Audio Mixer. Ignore Time Scale (default): real time, like the Bgm fades; it goes on while Time.timeScale is 0. Follow Time Scale: game time; Time.timeScale slows it and it stands still at 0.")]
+            [SerializeField] StateAudioTimeScale _timeScale;
 
             /// <summary>The state this binding reacts to. A binding without a state does nothing.</summary>
             public StateId State
@@ -112,6 +117,18 @@ namespace ALittleBB.StateMachines
             {
                 get => _seconds;
                 set => _seconds = value;
+            }
+
+            /// <summary>
+            /// Clock of <see cref="StateAudioAction.TransitionToSnapshot"/>: real time
+            /// (<see cref="StateAudioTimeScale.IgnoreTimeScale"/>, the default) or game time
+            /// (<see cref="StateAudioTimeScale.FollowTimeScale"/>), whatever the Update Mode of the Audio Mixer.
+            /// The Bgm fades always use real time.
+            /// </summary>
+            public StateAudioTimeScale TimeScale
+            {
+                get => _timeScale;
+                set => _timeScale = value;
             }
         }
 
@@ -204,10 +221,15 @@ namespace ALittleBB.StateMachines
             _subscriptions.Clear();
             _sync.Clear();
 
-            // The music goes on; a fade under way ends at once where it was going (no clip left half loud).
+            // The music goes on; a fade under way ends at once where it was going (no clip left half loud), and so
+            // does a snapshot transition (no mixer left half way).
             if (_player != null)
                 _player.Finish();
+
+            StateAudioSnapshotTransitions.Finish(this);
         }
+
+        void Update() => StateAudioSnapshotTransitions.Update(this);
 
         void OnMoment(StateId state, StateMoment moment)
         {
@@ -298,7 +320,7 @@ namespace ALittleBB.StateMachines
                         if (entry.Snapshot == null)
                             WarnOnce(entry, i, "Snapshot is not set");
                         else
-                            entry.Snapshot.TransitionTo(entry.Seconds);
+                            StateAudioSnapshotTransitions.Start(this, entry.Snapshot, entry.Seconds, entry.TimeScale);
                         break;
                 }
             }
