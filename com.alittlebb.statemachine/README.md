@@ -5,10 +5,10 @@ and anything that cares about a state (a UI panel, music, input) listens for it,
 
 - `Switch` replaces the current state. `Push` puts a state on top of the current one without exiting it, and `Pop` goes back to it.
 - A listener is told when its state is entered, exited, paused (covered by a pushed state) and resumed.
-- `StateMachineHost` and `StateListener` are components, so a scene can be wired without writing a script.
+- `StateMachineHost`, `StateListener` and `StateAnimatorBinding` are components, so a scene can be wired without writing a script.
 - A transition requested in the middle of another one is queued and runs after it.
 
-Package id `com.alittlebb.statemachine`, namespace `ALittleBB.StateMachines`, Unity 6000.0 or newer. The runtime has no dependency on another package.
+Package id `com.alittlebb.statemachine`, namespace `ALittleBB.StateMachines`, Unity 6000.0 or newer. The runtime has no dependency on another package; `StateAnimatorBinding` uses the Animator of Unity's built-in Animation module, which is enabled by default.
 
 ## Contents
 
@@ -18,6 +18,7 @@ Package id `com.alittlebb.statemachine`, namespace `ALittleBB.StateMachines`, Un
 - [Listen from code](#listen-from-code)
 - [Set up a StateListener in the Inspector](#set-up-a-statelistener-in-the-inspector)
 - [Active, paused and inactive](#active-paused-and-inactive)
+- [Drive an Animator with StateAnimatorBinding](#drive-an-animator-with-stateanimatorbinding)
 - [Nested transitions are queued](#nested-transitions-are-queued)
 - [Sample: Menu, Gameplay and Pause](#sample-menu-gameplay-and-pause)
 - [Tests](#tests)
@@ -43,6 +44,7 @@ From a git repository that holds the package in a subfolder, use **+ > Install p
 | `IState` | Optional logic of a state: `Enter()` and `Exit()`. Bind it to an id with `machine.Register(id, state)`. A `StateId` works without one. |
 | `StateMachineHost` | A component that owns one `StateMachine` (`host.Machine`), enters its **Initial State** in `Start`, and has `Switch`, `Push` and `Pop` methods a UnityEvent can call. In Play mode its Inspector shows the stack. |
 | `StateListener` | A component that raises UnityEvents (**On Enter**, **On Exit**, **On Paused**, **On Resumed**) for a set of `StateId`. |
+| `StateAnimatorBinding` | A component that drives the Animator on its GameObject from a list of bindings: at this moment of this `StateId`, set a trigger, a bool or an integer, or cross fade to a state. |
 | `StateChanged` | The signal of one transition: `From`, `To` and `Kind` (`StateChangeKind.Switch`, `Push` or `Pop`). |
 | `StateSubscription` | What `Subscribe` returns. `Status` is `StateListenerStatus.Inactive`, `Active` or `Paused`; `Dispose()` unsubscribes. |
 
@@ -187,6 +189,7 @@ Things to know:
 - **Host** and **States** are read once, in `Awake`. To set them from code, do it before the GameObject is first activated.
 - With no **Host** and no host on a parent, the listener logs one error and never raises an event.
 - From code, add handlers the usual way: `listener.OnEnter.AddListener(...)`, and the same for `OnExit`, `OnPaused` and `OnResumed`.
+- To open and close a panel with an animation instead of **SetActive**, see [Drive an Animator with StateAnimatorBinding](#drive-an-animator-with-stateanimatorbinding).
 
 ## Active, paused and inactive
 
@@ -226,6 +229,83 @@ What follows from the rule:
 - Moving between two states of the same set calls nothing: a listener of `{Gameplay, Cutscene}` stays active through `Switch(Cutscene)`.
 - A listener that subscribes late is synced right away: when one of its states is already on the stack it gets On Enter, followed by On Paused when that state is not on top.
 
+## Drive an Animator with StateAnimatorBinding
+
+`StateAnimatorBinding` drives the Animator on its GameObject from the states of a host, from the Inspector and
+without code. It holds a list of bindings, and each one says: at this moment of this state, do this to the Animator.
+
+1. On the GameObject that has the **Animator**, **Add Component > ALittleBB > State Machine > State Animator Binding**. The Animator is always the one on the same GameObject; there is no field for it.
+2. **Host**: drag the host in. Leave it empty to use the `StateMachineHost` on the same GameObject or on its nearest parent.
+3. **Bindings**: press **+** once for each thing the Animator should do, and fill the entry in:
+
+| Field | What to set |
+|---|---|
+| **State** | The `StateId` the binding reacts to. An entry without a state does nothing. |
+| **Moment** | When to act: **Enter**, **Exit**, **Paused** or **Resumed** (first table below). |
+| **Action** | What to do: **Set Trigger**, **Set Bool**, **Set Integer** or **Cross Fade** (second table below). |
+| **Name** | The name of the Animator parameter, or of the Animator state for Cross Fade. |
+| **Bool Value** | The value for Set Bool. |
+| **Int Value** | The value for Set Integer. |
+| **Duration** | The length of the Cross Fade, in seconds. 0 switches at once. |
+
+The moments are those of a listener of that one state (see [Active, paused and inactive](#active-paused-and-inactive)):
+
+| Moment | When |
+|---|---|
+| Enter | The state becomes the current state, and it was not on the stack before. |
+| Exit | The state leaves the stack, whether it was the current state or covered by another. |
+| Paused | Another state is pushed on top of the state. |
+| Resumed | The state on top is popped and the state is the current state again. |
+
+| Action | What it calls | What the Animator Controller needs |
+|---|---|---|
+| Set Trigger | `animator.SetTrigger(Name)` | A Trigger parameter called **Name**. |
+| Set Bool | `animator.SetBool(Name, Bool Value)` | A Bool parameter called **Name**. |
+| Set Integer | `animator.SetInteger(Name, Int Value)` | An Int parameter called **Name**. |
+| Cross Fade | `animator.CrossFadeInFixedTime(Name, Duration)` | A state called **Name**. It is looked up on every layer and the first layer that has it is used. |
+
+For example, a HUD that opens with `Gameplay` and dims while another state is pushed on top of it (the sample's HUD):
+
+| State | Moment | Action | Name | Bool Value |
+|---|---|---|---|---|
+| Gameplay | Enter | Set Bool | `IsOpen` | on |
+| Gameplay | Exit | Set Bool | `IsOpen` | off |
+| Gameplay | Paused | Set Bool | `IsDimmed` | on |
+| Gameplay | Resumed | Set Bool | `IsDimmed` | off |
+| Gameplay | Exit | Set Bool | `IsDimmed` | off |
+
+The last entry is there because leaving while paused is Exit only: Resumed is not called first, so without it
+`IsDimmed` would still be on the next time `Gameplay` is entered.
+
+Within one transition every Exit and Paused action is applied before any Enter and Resumed action, whatever the
+order of the list. Entries that share a state and a moment are applied in list order.
+
+### A transition does not wait for the animation
+
+A binding only starts an animation: it sets a parameter or begins a cross fade and returns. `Switch`, `Push` and
+`Pop` do not wait for the animation to finish. They are done as soon as the stack has changed and the listeners
+have been told, so the new state is already the current state while the old panel is still fading out. What
+follows from that:
+
+- Do not let the animation decide what the player can do. A panel that is fading out belongs to a state that was already left, so stop its input at once and let only the look take time. The sample does this with a second Animator layer that switches **Interactable** and **Blocks Raycasts** of the panel's `CanvasGroup` with a transition of 0 seconds, while the first layer fades its alpha.
+- State changes can come faster than the animations. For "open" and "closed", prefer a Bool parameter to a pair of Triggers: a bool says where the Animator has to end up, so it gets there whatever was playing. Triggers queue up instead: after Play → Main Menu → Play in one frame, a trigger-driven panel ends open for a state that was left. Transitions that can be interrupted (**Interruption Source** = *Next State*) let a change take over a fade that is still running.
+- To make something wait for an animation, do it yourself: for example, an Animation Event at the end of the clip calls a method of yours, and that method calls `host.Switch`.
+
+### Enabled, disabled and inactive
+
+`StateAnimatorBinding` follows the host while it is enabled on an active GameObject, from `OnEnable` to `OnDisable`.
+A `StateListener` keeps listening while its GameObject is inactive; this component does not, because the Animator
+does not either: Unity's Animator forgets its parameters and goes back to its default states while its GameObject
+is inactive.
+
+- **Enter is applied again each time the component is enabled.** It is synced with the stack like a new listener: every Enter action of a state that is on the stack is applied (triggers and cross fades included), followed by the Paused actions when that state is covered by another.
+- **What happens while it is disabled is dropped.** An Exit or a Paused that comes while the component is disabled or its GameObject is inactive is not applied, then or later.
+- **So keep an animated panel active**, and let the animation hide it: give the panel a `CanvasGroup` and make the closed pose alpha 0 with **Interactable** and **Blocks Raycasts** off, so that a closed panel cannot take a click. A panel that is deactivated with `SetActive(false)` when its state exits never plays its close animation, and its Animator starts from the default state the next time.
+- An Animator with **Keep Animator State On Disable** keeps what it had, so there the Enter actions are applied on top of it.
+- A binding whose parameter or state is not in the Animator Controller, or whose parameter is of another type, logs one warning the first time it is needed and does nothing; the other bindings still work.
+- Without an Animator on the GameObject, or without a host, the component logs one error and drives nothing.
+- **Host** and the states of **Bindings** are read each time the component is enabled. To change them from code, do it while the component is disabled.
+
 ## Nested transitions are queued
 
 `Switch`, `Push` and `Pop` called from outside a transition finish before they return. Called while a transition
@@ -262,8 +342,9 @@ public class LoadingState : IState
 
 ## Sample: Menu, Gameplay and Pause
 
-One scene that goes MainMenu → Gameplay → Pause popup and back. It has no script: three `StateListener` components
-show and hide the panels, and the buttons call the `StateMachineHost` from their **On Click**.
+One scene that goes MainMenu → Gameplay → Pause popup and back. It has no script: three `StateAnimatorBinding`
+components open and close the panels with an Animator, a `StateListener` changes the HUD's status text, and the
+buttons call the `StateMachineHost` from their **On Click**.
 
 Import it:
 
@@ -276,6 +357,7 @@ What the sample needs:
 
 - **Unity UI** (`com.unity.ugui`). The texts are legacy `Text` components, so TextMeshPro and its essential resources are not needed.
 - **Input System** (`com.unity.inputsystem`) with **Project Settings > Player > Active Input Handling** set to *Input System Package (New)* or *Both*: the scene's EventSystem uses the **Input System UI Input Module**. In a project that uses the old Input Manager only, replace that component with a **Standalone Input Module**.
+- Unity's built-in Animation and UI modules (Animator, CanvasGroup), which are enabled by default.
 - Nothing from a render pipeline: the camera only clears the screen.
 
 What is in the scene:
@@ -283,15 +365,31 @@ What is in the scene:
 | Object | Components | What it does |
 |---|---|---|
 | `State Machine` | `StateMachineHost` | Initial State = `MainMenu`. Select it in Play mode to see the stack. |
-| `Canvas/Main Menu` | `StateListener` for `MainMenu` | On Enter / On Exit show and hide `Main Menu Panel`. **Play** calls `Switch(Gameplay)`. |
-| `Canvas/Gameplay HUD` | `StateListener` for `Gameplay` | On Enter / On Exit show and hide `Gameplay HUD Panel`. On Paused and On Resumed change its status text. **Pause** calls `Push(Pause)`, **Main Menu** calls `Switch(MainMenu)`. |
-| `Canvas/Pause Popup` | `StateListener` for `Pause` | On Enter / On Exit show and hide `Pause Panel`. **Resume** calls `Pop()`, **Main Menu** calls `Switch(MainMenu)`. |
+| `Canvas/Main Menu` | `CanvasGroup`, `Animator` (`Panel` controller), `StateAnimatorBinding` | `MainMenu` Enter sets `IsOpen` on, Exit sets it off. **Play** calls `Switch(Gameplay)`. |
+| `Canvas/Gameplay HUD` | `CanvasGroup`, `Animator` (`GameplayHud` controller), `StateAnimatorBinding`, `StateListener` for `Gameplay` | `Gameplay` Enter / Exit set `IsOpen`, Paused / Resumed set `IsDimmed`, and Exit also sets `IsDimmed` off. The listener's On Enter, On Paused and On Resumed change the status text. **Pause** calls `Push(Pause)`, **Main Menu** calls `Switch(MainMenu)`. |
+| `Canvas/Pause Popup` | `CanvasGroup`, `Animator` (`Panel` controller), `StateAnimatorBinding` | `Pause` Enter sets `IsOpen` on, Exit sets it off. **Resume** calls `Pop()`, **Main Menu** calls `Switch(MainMenu)`. |
+
+The panels are never deactivated. Each one is a `CanvasGroup` that its Animator fades and switches off, see
+[Enabled, disabled and inactive](#enabled-disabled-and-inactive). The two Animator Controllers are in the sample's
+`Animations` folder, and each has two layers driven by the same Bool parameters:
+
+| Layer | States | What it animates | Transitions |
+|---|---|---|---|
+| **Base Layer** | `Closed` (default), `Open`, and `Dimmed` in `GameplayHud` | Alpha of the `CanvasGroup`: 0, 1 and 0.5. | 0.2 seconds, and they can be interrupted. |
+| **Input** | `Off` (default), `On` | **Interactable** and **Blocks Raycasts** of the `CanvasGroup`. `On` only while `IsOpen` is on and, in `GameplayHud`, `IsDimmed` is off. | 0 seconds. |
+
+Why two layers: Unity keeps a bool property on until a blend between "on" and "off" has ended, so with one layer
+a panel would still take clicks while it fades out, and a second click on **Resume** would call `Pop()` again.
+With the **Input** layer a panel takes clicks exactly while its state says so, and only its look takes 0.2 seconds.
 
 Things to try:
 
-- Press **Pause**: the HUD stays on screen under the popup and its status text changes, because the HUD's listener got On Paused, not On Exit.
-- Press **Main Menu** in the popup: one `Switch` exits both Pause and Gameplay, and both panels are hidden by their On Exit.
-- The listeners sit on objects that stay active (`Main Menu`, `Gameplay HUD`, `Pause Popup`), and the panels they show and hide are their children. The HUD and Pause panels start hidden in the scene.
+- Press **Pause**: the HUD dims and stays on screen under the popup, and its status text changes, because Gameplay was paused, not exited.
+- Press **Main Menu** in the popup: one `Switch` exits both Pause and Gameplay, and both panels fade out. The HUD's binding list has a second Exit entry that sets `IsDimmed` off, because leaving while paused is Exit only.
+- Click **Play**, **Pause** and **Main Menu** as fast as you can: a state change does not wait for a fade, and the panels still end where the stack is, because Bool parameters say where each Animator has to end up.
+- Select a panel in Play mode and open the Animator window to watch its two layers.
+- Before Play only the Main Menu is visible in the scene: the `CanvasGroup` of the HUD and of the popup is saved with alpha 0. Raise it in the Inspector to look at them; the Animator sets it again in Play mode.
+- The Animators run on scaled time. In a game that sets `Time.timeScale` to 0 while paused, set their **Update Mode** to **Unscaled Time**, or the popup never fades in.
 
 The three `StateId` assets are in the sample's `States` folder.
 

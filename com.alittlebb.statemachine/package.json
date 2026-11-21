@@ -4,6 +4,9 @@
   "displayName": "ALittleBB State Machine",
   "description": "State machine module: ScriptableObject state ids, Enter/Exit states, Switch and Push/Pop transitions with listener signals.",
   "unity": "6000.0",
+  "dependencies": {
+    "com.unity.modules.animation": "1.0.0"
+  },
   "keywords": [
     "state machine",
     "state",
@@ -15,7 +18,7 @@
   "samples": [
     {
       "displayName": "Menu, Gameplay and Pause",
-      "description": "One scene with a MainMenu and a Gameplay state (Switch) and a Pause popup pushed on top of Gameplay (Push / Pop). StateListener components show and hide the UI panels; the sample has no script. Needs Unity UI (com.unity.ugui) and the Input System (com.unity.inputsystem).",
+      "description": "One scene with a MainMenu and a Gameplay state (Switch) and a Pause popup pushed on top of Gameplay (Push / Pop). StateAnimatorBinding components open and close the UI panels with an Animator; the sample has no script. Needs Unity UI (com.unity.ugui) and the Input System (com.unity.inputsystem).",
       "path": "Samples~/MenuGameplayPause"
     }
   ]
