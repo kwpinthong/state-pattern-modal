@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
 using UnityEditor;
+using UnityEditor.Animations;
 using UnityEditor.PackageManager.UI;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -30,6 +31,9 @@ namespace ALittleBB.StateMachines.Tests
             "Packages/com.unity.ugui/",
             "Packages/com.unity.inputsystem/"
         };
+
+        /// <summary>Files of the sample that can hold a reference to another asset.</summary>
+        static readonly string[] AssetFileExtensions = { ".unity", ".asset", ".controller", ".anim" };
 
         readonly List<string> _problemsLogged = new List<string>();
         Scene _scene;
@@ -137,8 +141,11 @@ namespace ALittleBB.StateMachines.Tests
             Assert.That(hosts.Length, Is.EqualTo(1), "hosts in the sample scene");
             Assert.That(hosts[0].InitialState, Is.Not.Null, "Initial State of the host");
 
+            // The panels are opened and closed by StateAnimatorBinding (see the GEN011 tests below); the one listener
+            // left is the HUD's, which changes its status text.
             StateListener[] listeners = ComponentsInScene<StateListener>();
-            Assert.That(listeners.Length, Is.EqualTo(3), "listeners in the sample scene (Main Menu, Gameplay HUD, Pause Popup)");
+            Assert.That(listeners.Select(listener => PathOf(listener.gameObject)), Is.EqualTo(new[] { "Canvas/Gameplay HUD" }),
+                "listeners in the sample scene");
 
             var problems = new List<string>();
             foreach (StateListener listener in listeners)
@@ -152,15 +159,106 @@ namespace ALittleBB.StateMachines.Tests
                     problems.Add($"{who}: starts inactive, so it would not subscribe");
 
                 problems.AddRange(BrokenCalls(listener.OnEnter, who + " On Enter", mustHaveCalls: true));
-                problems.AddRange(BrokenCalls(listener.OnExit, who + " On Exit", mustHaveCalls: true));
-                problems.AddRange(BrokenCalls(listener.OnPaused, who + " On Paused", mustHaveCalls: false));
-                problems.AddRange(BrokenCalls(listener.OnResumed, who + " On Resumed", mustHaveCalls: false));
+                problems.AddRange(BrokenCalls(listener.OnExit, who + " On Exit", mustHaveCalls: false));
+                problems.AddRange(BrokenCalls(listener.OnPaused, who + " On Paused", mustHaveCalls: true));
+                problems.AddRange(BrokenCalls(listener.OnResumed, who + " On Resumed", mustHaveCalls: true));
             }
 
             foreach (UnityEngine.UI.Button button in ComponentsInScene<UnityEngine.UI.Button>())
                 problems.AddRange(BrokenCalls(button.onClick, PathOf(button.gameObject) + " On Click", mustHaveCalls: true));
 
             Assert.That(problems, Is.Empty);
+        }
+
+        /// <summary>
+        /// GEN-011 C1, the part that can be read from the scene: every panel has a CanvasGroup, an Animator with a
+        /// controller of the sample and a StateAnimatorBinding whose bindings name parameters the controller has.
+        /// That the animations play is checked in Play mode (SampleSceneTests).
+        /// </summary>
+        [Test]
+        public void GEN011_C1_ImportedScene_HasItsPanelsWired_ToAnAnimator_ThroughStateAnimatorBinding()
+        {
+            StateMachineHost[] hosts = ComponentsInScene<StateMachineHost>();
+            Assert.That(hosts.Length, Is.EqualTo(1), "hosts in the sample scene");
+
+            StateAnimatorBinding[] panels = ComponentsInScene<StateAnimatorBinding>();
+            Assert.That(panels.Select(panel => PathOf(panel.gameObject)),
+                Is.EquivalentTo(new[] { "Canvas/Main Menu", "Canvas/Gameplay HUD", "Canvas/Pause Popup" }),
+                "objects of the sample scene with a StateAnimatorBinding");
+
+            string sampleFolder = ImportedSample.FolderPath + "/";
+            var problems = new List<string>();
+            foreach (StateAnimatorBinding panel in panels)
+            {
+                string who = PathOf(panel.gameObject);
+                if (panel.Host != hosts[0])
+                    problems.Add($"{who}: Host is not the host of the scene");
+                if (!panel.gameObject.activeInHierarchy || !panel.enabled)
+                    problems.Add($"{who}: starts inactive or disabled, so it would miss the first state");
+                if (panel.GetComponent<CanvasGroup>() == null)
+                    problems.Add($"{who}: no CanvasGroup for the animation to fade and to switch off input");
+
+                var animator = panel.GetComponent<Animator>();
+                var controller = animator != null ? animator.runtimeAnimatorController as AnimatorController : null;
+                if (controller == null)
+                {
+                    problems.Add($"{who}: no Animator with an Animator Controller");
+                    continue;
+                }
+
+                string controllerPath = AssetDatabase.GetAssetPath(controller);
+                if (!controllerPath.StartsWith(sampleFolder, StringComparison.Ordinal))
+                    problems.Add($"{who}: its Animator Controller '{controllerPath}' is not in the sample folder");
+
+                foreach (StateMoment moment in new[] { StateMoment.Enter, StateMoment.Exit })
+                {
+                    if (!panel.Bindings.Any(binding => binding != null && binding.Moment == moment))
+                        problems.Add($"{who}: no binding for {moment}, so the panel would never {(moment == StateMoment.Enter ? "open" : "close")}");
+                }
+
+                for (int i = 0; i < panel.Bindings.Count; i++)
+                    problems.AddRange(BrokenBinding(panel.Bindings[i], controller, $"{who} Bindings[{i}]"));
+            }
+
+            Assert.That(problems, Is.Empty);
+        }
+
+        /// <summary>GEN-011: the requirement is "an Animator instead of SetActive", so nothing in the scene calls SetActive any more.</summary>
+        [Test]
+        public void GEN011_ImportedScene_ShowsAndHidesNothing_WithSetActive()
+        {
+            var events = new List<KeyValuePair<string, UnityEventBase>>();
+            foreach (StateListener listener in ComponentsInScene<StateListener>())
+            {
+                string who = PathOf(listener.gameObject);
+                events.Add(new KeyValuePair<string, UnityEventBase>(who + " On Enter", listener.OnEnter));
+                events.Add(new KeyValuePair<string, UnityEventBase>(who + " On Exit", listener.OnExit));
+                events.Add(new KeyValuePair<string, UnityEventBase>(who + " On Paused", listener.OnPaused));
+                events.Add(new KeyValuePair<string, UnityEventBase>(who + " On Resumed", listener.OnResumed));
+            }
+
+            foreach (UnityEngine.UI.Button button in ComponentsInScene<UnityEngine.UI.Button>())
+                events.Add(new KeyValuePair<string, UnityEventBase>(PathOf(button.gameObject) + " On Click", button.onClick));
+
+            string[] setActiveCalls = events
+                .SelectMany(entry => Enumerable.Range(0, entry.Value.GetPersistentEventCount())
+                    .Where(i => entry.Value.GetPersistentMethodName(i) == nameof(GameObject.SetActive))
+                    .Select(i => $"{entry.Key} [{i}]"))
+                .ToArray();
+            Assert.That(setActiveCalls, Is.Empty, "UnityEvent entries of the sample scene that call GameObject.SetActive");
+
+            string[] inactive = AllGameObjects().Where(gameObject => !gameObject.activeSelf).Select(PathOf).ToArray();
+            Assert.That(inactive, Is.Empty,
+                "GameObjects that start inactive (an Animator forgets its state there and StateAnimatorBinding drops what it misses)");
+        }
+
+        [Test]
+        public void GEN011_ImportedSample_HasItsAnimatorControllersAndClips_InTheSampleFolder()
+        {
+            Assert.That(AssetNames("t:AnimatorController"), Is.EqualTo(new[] { "GameplayHud", "Panel" }),
+                "Animator Controllers of the imported sample");
+            Assert.That(AssetNames("t:AnimationClip"), Is.EqualTo(new[] { "Closed", "Dimmed", "InputOff", "InputOn", "Open" }),
+                "Animation Clips of the imported sample (three poses of the fade, two of the input)");
         }
 
         [Test]
@@ -208,9 +306,44 @@ namespace ALittleBB.StateMachines.Tests
             return _scene.GetRootGameObjects().SelectMany(root => root.GetComponentsInChildren<T>(true)).ToArray();
         }
 
+        static string[] AssetNames(string filter)
+        {
+            return AssetDatabase.FindAssets(filter, new[] { ImportedSample.FolderPath })
+                .Select(AssetDatabase.GUIDToAssetPath)
+                .Select(Path.GetFileNameWithoutExtension)
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToArray();
+        }
+
+        /// <summary>What is wrong with one binding of a StateAnimatorBinding, checked against the Animator Controller it drives.</summary>
+        static IEnumerable<string> BrokenBinding(StateAnimatorBinding.Entry binding, AnimatorController controller, string what)
+        {
+            if (binding == null || binding.State == null)
+            {
+                yield return $"{what}: no State";
+                yield break;
+            }
+
+            if (binding.Action == StateAnimatorAction.CrossFade)
+            {
+                bool hasState = controller.layers.Any(layer => layer.stateMachine.states.Any(child => child.state.name == binding.Name));
+                if (!hasState)
+                    yield return $"{what}: '{controller.name}' has no state '{binding.Name}'";
+
+                yield break;
+            }
+
+            AnimatorControllerParameterType type =
+                binding.Action == StateAnimatorAction.SetTrigger ? AnimatorControllerParameterType.Trigger
+                : binding.Action == StateAnimatorAction.SetBool ? AnimatorControllerParameterType.Bool
+                : AnimatorControllerParameterType.Int;
+            if (!controller.parameters.Any(parameter => parameter.name == binding.Name && parameter.type == type))
+                yield return $"{what}: '{controller.name}' has no {type} parameter '{binding.Name}'";
+        }
+
         /// <summary>
-        /// Every asset GUID written in the files of the imported sample (the scene and the StateId assets),
-        /// with the file it is written in. A reference from one file to another is always by GUID, so this is
+        /// Every asset GUID written in the files of the imported sample (the scene, the StateId assets, the
+        /// Animator Controllers and their clips), with the file it is written in. A reference from one file to another is always by GUID, so this is
         /// what breaks when a .meta file is lost on import or a package is not installed.
         /// </summary>
         static Dictionary<string, string> AssetReferencesOfTheSample()
@@ -219,7 +352,7 @@ namespace ALittleBB.StateMachines.Tests
             string folder = ImportedSample.FolderPath;
             foreach (string file in Directory.GetFiles(folder, "*", SearchOption.AllDirectories))
             {
-                if (!file.EndsWith(".unity", StringComparison.Ordinal) && !file.EndsWith(".asset", StringComparison.Ordinal))
+                if (!AssetFileExtensions.Any(extension => file.EndsWith(extension, StringComparison.Ordinal)))
                     continue;
 
                 foreach (Match match in Regex.Matches(File.ReadAllText(file), @"guid: ([0-9a-f]{32})"))

@@ -84,6 +84,56 @@ namespace ALittleBB.StateMachines.Tests
             Assert.That(section, Does.Contain(ImportedSample.DisplayName), "display name of the sample in package.json");
         }
 
+        // ---------------------------------------------------------------- GEN-011 C4: the Animator section
+
+        [Test]
+        public void GEN011_C4_Readme_AnimatorSection_ExplainsHowToSetUpABinding()
+        {
+            string section = Section(@"Animator");
+
+            foreach (string step in new[] { "StateAnimatorBinding", "Add Component", "State Animator Binding", "Animator", "Host", "Bindings" })
+                Assert.That(section, Does.Contain(step), "the Animator section: where the component goes and what to set on it");
+
+            foreach (string field in new[] { "State", "Moment", "Action", "Name", "Bool Value", "Int Value", "Duration" })
+                Assert.That(section, Does.Contain($"**{field}**"), "the Animator section: fields of one binding, as the Inspector names them");
+
+            foreach (StateMoment moment in System.Enum.GetValues(typeof(StateMoment)))
+                Assert.That(section, Does.Contain(moment.ToString()), "the Animator section: every moment a binding can react to");
+
+            foreach (string action in new[] { "Set Trigger", "Set Bool", "Set Integer", "Cross Fade" })
+                Assert.That(section, Does.Contain(action), "the Animator section: every action a binding can do");
+        }
+
+        [Test]
+        public void GEN011_C4_Readme_AnimatorSection_SaysThatATransitionDoesNotWaitForTheAnimation()
+        {
+            string section = Section(@"Animator");
+
+            Assert.That(section, Does.Match(@"(?i)(does|do) not wait for (the|an|its) animation"),
+                "the Animator section: the note that a transition does not wait for the animation to finish");
+        }
+
+        [Test]
+        public void GEN011_C4_Readme_AnimatorSection_ExplainsWhatHappensWhenTheGameObjectIsDisabledAndEnabled()
+        {
+            string section = Section(@"Animator");
+
+            Assert.That(section, Does.Match(@"(?i)\benabled\b"), "the Animator section: Enter is applied again when the component is enabled");
+            Assert.That(section, Does.Match(@"(?i)\binactive\b"), "the Animator section: what is missed while the GameObject is inactive");
+            Assert.That(section, Does.Match(@"(?i)\bdropped\b"), "the Animator section: an Exit that comes while it is disabled is dropped");
+            Assert.That(section, Does.Contain("CanvasGroup"), "the Animator section: keep the panel active and hide it with the animation");
+        }
+
+        [Test]
+        public void GEN011_Readme_SampleSection_SaysThePanelsAreAnimated_ThroughStateAnimatorBinding()
+        {
+            string section = Section(@"sample");
+
+            Assert.That(section, Does.Contain("StateAnimatorBinding"));
+            Assert.That(section, Does.Contain("Animator"));
+            Assert.That(section, Does.Not.Contain("show and hide"), "the old description: listeners that show and hide the panels with SetActive");
+        }
+
         /// <summary>The first section whose heading matches the pattern: its heading and everything under it.</summary>
         string Section(string headingPattern)
         {
