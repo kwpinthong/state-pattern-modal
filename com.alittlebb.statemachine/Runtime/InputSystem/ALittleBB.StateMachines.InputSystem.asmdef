@@ -1,0 +1,25 @@
+{
+    "name": "ALittleBB.StateMachines.InputSystem",
+    "rootNamespace": "ALittleBB.StateMachines",
+    "references": [
+        "ALittleBB.StateMachines",
+        "Unity.InputSystem"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "ALITTLEBB_STATEMACHINES_INPUT_SYSTEM"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.unity.inputsystem",
+            "expression": "",
+            "define": "ALITTLEBB_STATEMACHINES_INPUT_SYSTEM"
+        }
+    ],
+    "noEngineReferences": false
+}

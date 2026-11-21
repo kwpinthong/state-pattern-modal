@@ -19,6 +19,7 @@ Package id `com.alittlebb.statemachine`, namespace `ALittleBB.StateMachines`, Un
 - [Set up a StateListener in the Inspector](#set-up-a-statelistener-in-the-inspector)
 - [Active, paused and inactive](#active-paused-and-inactive)
 - [Drive an Animator with StateAnimatorBinding](#drive-an-animator-with-stateanimatorbinding)
+- [Turn action maps on and off with StateInputBinding](#turn-action-maps-on-and-off-with-stateinputbinding)
 - [Nested transitions are queued](#nested-transitions-are-queued)
 - [Sample: Menu, Gameplay and Pause](#sample-menu-gameplay-and-pause)
 - [Tests](#tests)
@@ -306,6 +307,24 @@ is inactive.
 - Without an Animator on the GameObject, or without a host, the component logs one error and drives nothing.
 - **Host** and the states of **Bindings** are read each time the component is enabled. To change them from code, do it while the component is disabled.
 
+## Turn action maps on and off with StateInputBinding
+
+`StateInputBinding` enables and disables the action maps of one **Input Action Asset** of the Input System with the
+states of a host. It lives in its own assembly, `ALittleBB.StateMachines.InputSystem`, which compiles only when the
+project has the Input System package (`com.unity.inputsystem`); without it the rest of the package works and the
+component is simply not there.
+
+1. **Add Component > ALittleBB > State Machine > State Input Binding** on any GameObject.
+2. Set **Host** and **Actions** (the Input Action Asset).
+3. Add one entry per action map: **States** (the states during which the map is enabled), **Action Map** (its name in the asset) and **When Paused**.
+
+What it does:
+
+- The map of an entry is enabled as soon as one of its **States** becomes the current state, before `Switch` returns, and disabled when none of them is on the stack any more.
+- Moving between two states of the same entry does not touch the map, so a key that is held across the change is not cancelled. List every state that shares a map in one entry.
+- Action maps that are in no entry are never touched; other code keeps control of them.
+- **When Paused** is not applied yet: for now a map stays enabled while its state is paused under a pushed state.
+
 ## Nested transitions are queued
 
 `Switch`, `Push` and `Pop` called from outside a transition finish before they return. Called while a transition
@@ -395,7 +414,7 @@ The three `StateId` assets are in the sample's `States` folder.
 
 ## Tests
 
-The package has EditMode and PlayMode tests in `Tests/`. To run them in a project that uses the package, add it to
+The package has EditMode and PlayMode tests in `Tests/`; the tests of `StateInputBinding` (`Tests/InputSystem`) compile only with the Input System and use its test fixture. To run them in a project that uses the package, add it to
 `testables` in `Packages/manifest.json`:
 
 ```json
