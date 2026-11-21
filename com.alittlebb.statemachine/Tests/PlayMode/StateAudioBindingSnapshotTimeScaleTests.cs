@@ -254,8 +254,9 @@ namespace ALittleBB.StateMachines.Tests
         }
 
         /// <summary>
-        /// A to Muffled over 0.5 s, then B to Normal over 0.5 s once A's transition is past -8 dB. Each frame the
-        /// parameter may move by what 20 dB in 0.5 s gives for the frame's own delta time, plus 1 dB: a jump to
+        /// A to Muffled over 2 s (slow, so that an Editor stall does not carry it far past -8 dB), then B to Normal
+        /// over 0.5 s once A's transition is past -8 dB. Each frame the
+        /// parameter may move by what 20 dB in 0.5 s gives for the frame's delta time, plus 1 dB: a jump to
         /// Normal (8 dB) or back to Muffled (12 dB) is more.
         /// </summary>
         IEnumerator Interrupt(StateAudioTimeScale first, StateAudioTimeScale second, AudioMixerUpdateMode mode)
@@ -263,7 +264,7 @@ namespace ALittleBB.StateMachines.Tests
             _mixer.updateMode = mode;
             StateMachineHost host = CreateHost();
             CreateBinding("Mixer binding", host,
-                ToSnapshot(_a, StateMoment.Enter, _muffled, 0.5f, first),
+                ToSnapshot(_a, StateMoment.Enter, _muffled, 2f, first),
                 ToSnapshot(_b, StateMoment.Enter, _normal, 0.5f, second));
             yield return null;
 
@@ -284,6 +285,7 @@ namespace ALittleBB.StateMachines.Tests
             float last = before;
             float lowest = before;
             float tooBig = 0f;
+            float lastDelta = 0f;
             frames = 0;
             start = Time.realtimeSinceStartup;
             while (Mathf.Abs(Volume() - NormalDb) > Tolerance && frames < 10 * FramesPerSecond && Time.realtimeSinceStartup - start < 3f)
@@ -291,11 +293,13 @@ namespace ALittleBB.StateMachines.Tests
                 yield return null;
                 frames++;
                 float volume = Volume();
-                trace.Append($" {frames}:{volume:F2}");
                 float delta = second == StateAudioTimeScale.FollowTimeScale ? Time.deltaTime : Time.unscaledDeltaTime;
+                trace.Append($" {frames}:{volume:F2}/{delta:F3}s");
                 float step = Mathf.Abs(volume - last);
-                if (step > 1f + 40f * delta)
+                // The value read now may hold the mixer update of the frame before: allow for the longer of the two.
+                if (step > 1f + 40f * Mathf.Max(delta, lastDelta))
                     tooBig = Mathf.Max(tooBig, step);
+                lastDelta = delta;
                 lowest = Mathf.Min(lowest, volume);
                 last = volume;
             }
