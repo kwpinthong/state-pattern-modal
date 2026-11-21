@@ -26,6 +26,11 @@ namespace ALittleBB.StateMachines
     /// while it is disabled is not applied, then or later. Disabling or destroying it does not stop the music.</para>
     /// <para>A binding without its Audio Source, Clip or Snapshot logs one warning the first time it is needed and
     /// does nothing; the other bindings still work. Without a host, one warning is logged and nothing is played.</para>
+    /// <para>Transition To Snapshot moves the Audio Mixer of its Snapshot to that snapshot over Seconds, and needs no
+    /// Audio Source: a Paused binding can muffle the music while a panel is pushed on top, and a Resumed binding
+    /// bring it back on Pop. The transition is the mixer's own: its Update Mode decides whether Time.timeScale slows
+    /// it (Normal, the default: it stands still while Time.timeScale is 0) or not (Unscaled Time). A transition
+    /// never holds a state change, and a new one starts from where the mixer is.</para>
     /// <para><see cref="Host"/> and the states of <see cref="Bindings"/> are read each time the component is
     /// enabled.</para>
     /// </summary>
