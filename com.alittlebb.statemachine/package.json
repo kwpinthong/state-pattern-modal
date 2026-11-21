@@ -5,7 +5,8 @@
   "description": "State machine module: ScriptableObject state ids, Enter/Exit states, Switch and Push/Pop transitions with listener signals.",
   "unity": "6000.0",
   "dependencies": {
-    "com.unity.modules.animation": "1.0.0"
+    "com.unity.modules.animation": "1.0.0",
+    "com.unity.modules.audio": "1.0.0"
   },
   "keywords": [
     "state machine",
