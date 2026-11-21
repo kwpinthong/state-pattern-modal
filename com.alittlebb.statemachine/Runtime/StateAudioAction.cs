@@ -12,7 +12,12 @@ namespace ALittleBB.StateMachines
         /// <summary>Stops the music of the BGM Audio Source, fading it out first when Seconds &gt; 0.</summary>
         StopBgm = 1,
 
-        /// <summary>Moves the Audio Mixer to the binding's Snapshot over the binding's Seconds.</summary>
+        /// <summary>
+        /// Moves the Audio Mixer to the binding's Snapshot over the binding's Seconds
+        /// (<see cref="UnityEngine.Audio.AudioMixerSnapshot.TransitionTo"/>). The mixer's own Update Mode sets the
+        /// clock: Normal follows Time.timeScale (it stands still at 0), Unscaled Time does not. 0 changes it on the
+        /// next frame. It does not need the BGM Audio Source.
+        /// </summary>
         TransitionToSnapshot = 2,
     }
 }
