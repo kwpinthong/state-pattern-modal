@@ -320,10 +320,10 @@ component is simply not there.
 
 What it does:
 
-- The map of an entry is enabled as soon as one of its **States** becomes the current state, before `Switch` returns, and disabled when none of them is on the stack any more.
+- The map of an entry is enabled as soon as one of its **States** becomes the current state, before `Switch`, `Push` or `Pop` returns, and disabled when none of them is on the stack any more.
 - Moving between two states of the same entry does not touch the map, so a key that is held across the change is not cancelled. List every state that shares a map in one entry.
 - Action maps that are in no entry are never touched; other code keeps control of them.
-- **When Paused** is not applied yet: for now a map stays enabled while its state is paused under a pushed state.
+- **When Paused** says what happens while the state is paused under a pushed state: *Disable Map* (the default) disables the map until a `Pop` resumes the state, *Keep Map Enabled* leaves it enabled.
 
 ## Nested transitions are queued
 

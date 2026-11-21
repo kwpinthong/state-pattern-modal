@@ -20,8 +20,9 @@ namespace ALittleBB.StateMachines.Tests
     /// with the states of a <see cref="StateMachineHost"/>. Key presses are simulated with the Input System's
     /// <see cref="InputTestFixture"/>, which gives every test its own Input System with a test keyboard.
     /// C1 (the assemblies) is in <c>InputAssemblyTests</c> of the main EditMode assembly.
+    /// The tests of GEN-013 (Push/Pop, When Paused, late sync, disable) are in <c>StateInputBindingTests.Gen013.cs</c>.
     /// </summary>
-    public class StateInputBindingTests : InputTestFixture
+    public partial class StateInputBindingTests : InputTestFixture
     {
         // Every map has an action: InputActionMap.enabled is true only while one of its actions is enabled.
         const string Gameplay = "Gameplay"; // Jump: Space
