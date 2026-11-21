@@ -17,12 +17,12 @@ namespace ALittleBB.StateMachines.Tests
     /// (AudioMixers/StateAudioBindingSnapshotTest.mixer) has two snapshots, Normal and Muffled, and one exposed
     /// parameter, MusicVolume: the Master volume, 0 dB in Normal and -20 dB in Muffled. It is read with
     /// AudioMixer.GetFloat.
-    /// <para>Measured on Unity 6000.6.9f1 with this mixer: a transition follows the mixer's Update Mode, which is
-    /// Normal (scaled time) here: it stands still while Time.timeScale is 0 and, with Time.captureFramerate set,
-    /// moves by game time, not real time. The value moves in a straight line in dB and ends exactly on the snapshot's
-    /// value. GetFloat right after TransitionTo still gives the old value; a 0 second transition shows on the next
-    /// frame. The mixer moves with nothing playing through it. So the tests run at a fixed 60 frames a second and
-    /// count frames: 0.5 s is 30 frames.</para>
+    /// <para>Measured on Unity 6000.6.9f1 with this mixer: the value moves in a straight line in dB and ends exactly
+    /// on the snapshot's value. GetFloat right after TransitionTo still gives the old value; a 0 second transition
+    /// shows on the next frame. The mixer moves with nothing playing through it. The tests run at a fixed 60 frames a
+    /// second and count frames (0.5 s is 30 frames), so the bindings with Seconds &gt; 0 use Follow Time Scale
+    /// (game time): with Time.captureFramerate set, real time, which Ignore Time Scale uses, is not fixed
+    /// (GEN-018).</para>
     /// </summary>
     public class StateAudioBindingSnapshotTests
     {
@@ -92,7 +92,7 @@ namespace ALittleBB.StateMachines.Tests
         public IEnumerator C1_EnterSeed_TransitionToMuffled05_WhenPushSeed_TheParameterIsAtMuffledWithinHalfASecond()
         {
             StateMachineHost host = CreateHost();
-            CreateBinding("Mixer binding", host, ToSnapshot(_seed, StateMoment.Enter, _muffled, 0.5f));
+            CreateBinding("Mixer binding", host, Follow(ToSnapshot(_seed, StateMoment.Enter, _muffled, 0.5f)));
             yield return null;
             Assert.That(Volume(), Is.EqualTo(NormalDb).Within(Tolerance), "Given: Normal");
 
@@ -122,7 +122,7 @@ namespace ALittleBB.StateMachines.Tests
         public IEnumerator C1_AfterTheTransition_TheParameterStaysAtMuffled()
         {
             StateMachineHost host = CreateHost();
-            CreateBinding("Mixer binding", host, ToSnapshot(_seed, StateMoment.Enter, _muffled, 0.5f));
+            CreateBinding("Mixer binding", host, Follow(ToSnapshot(_seed, StateMoment.Enter, _muffled, 0.5f)));
             yield return null;
 
             host.Push(_seed);
@@ -181,8 +181,8 @@ namespace ALittleBB.StateMachines.Tests
         {
             StateMachineHost host = CreateHost();
             CreateBinding("Mixer binding", host,
-                ToSnapshot(_a, StateMoment.Paused, _muffled, 0.25f),
-                ToSnapshot(_a, StateMoment.Resumed, _normal, 0.25f));
+                Follow(ToSnapshot(_a, StateMoment.Paused, _muffled, 0.25f)),
+                Follow(ToSnapshot(_a, StateMoment.Resumed, _normal, 0.25f)));
             yield return null;
             host.Switch(_a);
 
@@ -199,8 +199,8 @@ namespace ALittleBB.StateMachines.Tests
         {
             StateMachineHost host = CreateHost();
             CreateBinding("Mixer binding", host,
-                ToSnapshot(_a, StateMoment.Paused, _muffled, 0.5f),
-                ToSnapshot(_a, StateMoment.Resumed, _normal, 0.25f));
+                Follow(ToSnapshot(_a, StateMoment.Paused, _muffled, 0.5f)),
+                Follow(ToSnapshot(_a, StateMoment.Resumed, _normal, 0.25f)));
             yield return null;
             host.Switch(_a);
             host.Push(_x);
@@ -355,45 +355,9 @@ namespace ALittleBB.StateMachines.Tests
             LogAssert.NoUnexpectedReceived();
         }
 
-        [UnityTest]
-        public IEnumerator Rule_TheTransitionFollowsTheMixersUpdateMode_Normal_StandsStillWhileTimeScaleIs0()
-        {
-            _mixer.updateMode = AudioMixerUpdateMode.Normal;
-            StateMachineHost host = CreateHost();
-            CreateBinding("Mixer binding", host, ToSnapshot(_a, StateMoment.Enter, _muffled, 0.25f));
-            yield return null;
-            Time.timeScale = 0f;
-
-            host.Switch(_a);
-            yield return Frames(FramesPerSecond);
-
-            Assert.That(Volume(), Is.GreaterThan(MuffledDb + 1f), "Update Mode Normal: game time, which is not moving");
-
-            Time.timeScale = 1f;
-            yield return WaitForVolume(MuffledDb, FramesPerSecond / 4 + 1, "it goes on once time moves again");
-            LogAssert.NoUnexpectedReceived();
-        }
-
-        [UnityTest]
-        public IEnumerator Rule_TheTransitionFollowsTheMixersUpdateMode_UnscaledTime_GoesOnWhileTimeScaleIs0()
-        {
-            _mixer.updateMode = AudioMixerUpdateMode.UnscaledTime;
-            Time.captureFramerate = 0;
-            StateMachineHost host = CreateHost();
-            CreateBinding("Mixer binding", host, ToSnapshot(_a, StateMoment.Enter, _muffled, 0.25f));
-            yield return null;
-            Time.timeScale = 0f;
-
-            host.Switch(_a);
-            float start = Time.realtimeSinceStartup;
-            while (Mathf.Abs(Volume() - MuffledDb) > Tolerance && Time.realtimeSinceStartup - start < 2f)
-                yield return null;
-            float took = Time.realtimeSinceStartup - start;
-
-            Assert.That(Volume(), Is.EqualTo(MuffledDb).Within(Tolerance), "Update Mode Unscaled Time: it gets there while Time.timeScale is 0");
-            Assert.That(took, Is.GreaterThan(0.2f), "over its 0.25 s of real time");
-            LogAssert.NoUnexpectedReceived();
-        }
+        // GEN-018: Rule_TheTransitionFollowsTheMixersUpdateMode_Normal_StandsStillWhileTimeScaleIs0 and
+        // Rule_TheTransitionFollowsTheMixersUpdateMode_UnscaledTime_GoesOnWhileTimeScaleIs0 were removed: the clock
+        // is now the binding's Time Scale, not the mixer's Update Mode (StateAudioBindingSnapshotTimeScaleTests).
 
         // ---------------------------------------------------------------- helpers
 
@@ -423,6 +387,13 @@ namespace ALittleBB.StateMachines.Tests
             }
 
             Assert.Fail($"{what}: not at {target} dB after {frames} frames. Trace:{trace}");
+        }
+
+        /// <summary>GEN-018: game time, which these tests count in frames (real time is not fixed by Time.captureFramerate).</summary>
+        static StateAudioBinding.Entry Follow(StateAudioBinding.Entry entry)
+        {
+            entry.TimeScale = StateAudioTimeScale.FollowTimeScale;
+            return entry;
         }
 
         static StateAudioBinding.Entry ToSnapshot(StateId state, StateMoment moment, AudioMixerSnapshot snapshot, float seconds)

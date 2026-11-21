@@ -381,12 +381,13 @@ bindings, and each one says: at this moment of this state, do this to the music.
 | **Clip** | The clip for Play Bgm. |
 | **Snapshot** | The Audio Mixer snapshot for Transition To Snapshot. |
 | **Seconds** | The crossfade of Play Bgm, the fade out of Stop Bgm, or the length of Transition To Snapshot. 0 changes at once. |
+| **Time Scale** | For Transition To Snapshot: **Ignore Time Scale** (the default) or **Follow Time Scale** ([below](#snapshot-transitions-ignore-or-follow-timetimescale)). |
 
 | Action | What it does |
 |---|---|
 | Play Bgm | Plays **Clip** looped on the Audio Source. When that clip is already playing, it goes on from where it is instead of starting again, so two states with the same music switch without a break. With **Seconds** > 0 it crossfades from the music that plays. |
 | Stop Bgm | Stops the music, fading it out first when **Seconds** > 0. |
-| Transition To Snapshot | Calls `TransitionTo(Seconds)` on **Snapshot**, which moves its Audio Mixer to that snapshot. It does not need the Audio Source. |
+| Transition To Snapshot | Moves the Audio Mixer of **Snapshot** to that snapshot over **Seconds**, on the clock chosen by **Time Scale**. It does not need the Audio Source. |
 
 For example, music for the menu and for gameplay, muffled while the pause popup is pushed on top:
 
@@ -409,19 +410,27 @@ list; entries that share a state and a moment are applied in list order.
 - `Switch`, `Push` and `Pop` do not wait for the fade. The transition is done and its signal is sent while the fade has just started.
 - A Play Bgm during a fade starts a new fade from where the volumes are, towards the newest clip. A Play Bgm or Stop Bgm with **Seconds** 0 ends the fade at once.
 
-### Snapshots follow the Audio Mixer's Update Mode
+### Snapshot transitions ignore or follow Time.timeScale
 
-Transition To Snapshot is the mixer's own transition, so it runs on the clock set by the **Update Mode** of the
-Audio Mixer asset, not on real time like the BGM fades. In **Normal**, the default, the transition stands still while `Time.timeScale` is 0;
-in **Unscaled Time** it does not. If the game sets `Time.timeScale` to 0 while paused, set the mixer's **Update Mode**
-to **Unscaled Time**, or a Paused binding that muffles the music does not get there until time runs again.
-A snapshot transition never holds a state change either, and a new one starts from where the mixer is.
+Each Transition To Snapshot binding chooses its clock with **Time Scale**, whatever the **Update Mode** set on the
+Audio Mixer asset:
+
+- **Ignore Time Scale**, the default: the transition runs on real time, like the BGM fades. It takes **Seconds** of real time and goes on while `Time.timeScale` is 0, so a Paused binding muffles the music on a pause screen that stops time.
+- **Follow Time Scale**: the transition runs on game time. `Time.timeScale` slows it (at 0.5 it takes twice **Seconds** of real time), and it stands still while `Time.timeScale` is 0, then goes on when time runs again.
+- **Seconds** 0 changes the mixer on the next frame with either choice, even while `Time.timeScale` is 0.
+
+The transition is the mixer's own, so it starts from the values the mixer has: a transition that starts during
+another one goes on from where the mixer is, without a jump, and ends on its own snapshot. To run on the chosen clock,
+the component sets the mixer's **Update Mode** to **Unscaled Time** (Ignore) or **Normal** (Follow) while the
+transition runs, and puts back the Update Mode the mixer had when it ends. A snapshot transition never holds a state
+change either. When the component is disabled or destroyed, its snapshot transition under way ends at once on its
+snapshot, as a BGM fade does.
 
 ### Enabled, disabled and other scenes
 
 - Each time the component is enabled it is synced with the stack as if the states on it had been entered one by one, bottom first: the Enter actions of each state, then its Paused actions when it is covered, then the next state up. So the music of the current state wins, whatever the order of the list, and plays as soon as the component starts, even for the Initial State the host entered before. A clip that is already playing goes on.
 - What happens while it is disabled is not applied, then or later.
-- Disabling or destroying the component does not stop the music. A fade under way ends at once where it was going: the new clip at full volume, or silence for Stop Bgm.
+- Disabling or destroying the component does not stop the music. A fade under way ends at once where it was going: the new clip at full volume, or silence for Stop Bgm. A snapshot transition under way ends at once on its snapshot.
 - **Host** and the states of **Bindings** are read each time the component is enabled. To change them from code, do it while it is disabled.
 - A binding without its Audio Source, Clip or Snapshot logs one warning the first time it is needed and does nothing; the other bindings still work. Without a host, the component logs one warning and plays nothing.
 
