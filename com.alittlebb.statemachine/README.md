@@ -5,10 +5,10 @@ and anything that cares about a state (a UI panel, music, input) listens for it,
 
 - `Switch` replaces the current state. `Push` puts a state on top of the current one without exiting it, and `Pop` goes back to it.
 - A listener is told when its state is entered, exited, paused (covered by a pushed state) and resumed.
-- `StateMachineHost`, `StateListener` and `StateAnimatorBinding` are components, so a scene can be wired without writing a script.
+- `StateMachineHost`, `StateListener`, `StateAnimatorBinding`, `StateAudioBinding` and `StateInputBinding` are components, so a scene can be wired without writing a script.
 - A transition requested in the middle of another one is queued and runs after it.
 
-Package id `com.alittlebb.statemachine`, namespace `ALittleBB.StateMachines`, Unity 6000.0 or newer. The runtime has no dependency on another package; `StateAnimatorBinding` uses the Animator of Unity's built-in Animation module, which is enabled by default.
+Package id `com.alittlebb.statemachine`, namespace `ALittleBB.StateMachines`, Unity 6000.0 or newer. The runtime has no dependency on another package; `StateAnimatorBinding` uses the Animator of Unity's built-in Animation module and `StateAudioBinding` the built-in Audio module, which are enabled by default. `StateInputBinding` appears only in a project that has the Input System package.
 
 ## Contents
 
@@ -20,6 +20,7 @@ Package id `com.alittlebb.statemachine`, namespace `ALittleBB.StateMachines`, Un
 - [Active, paused and inactive](#active-paused-and-inactive)
 - [Drive an Animator with StateAnimatorBinding](#drive-an-animator-with-stateanimatorbinding)
 - [Turn action maps on and off with StateInputBinding](#turn-action-maps-on-and-off-with-stateinputbinding)
+- [Play music with StateAudioBinding](#play-music-with-stateaudiobinding)
 - [Nested transitions are queued](#nested-transitions-are-queued)
 - [Sample: Menu, Gameplay and Pause](#sample-menu-gameplay-and-pause)
 - [Tests](#tests)
@@ -46,6 +47,8 @@ From a git repository that holds the package in a subfolder, use **+ > Install p
 | `StateMachineHost` | A component that owns one `StateMachine` (`host.Machine`), enters its **Initial State** in `Start`, and has `Switch`, `Push` and `Pop` methods a UnityEvent can call. In Play mode its Inspector shows the stack. |
 | `StateListener` | A component that raises UnityEvents (**On Enter**, **On Exit**, **On Paused**, **On Resumed**) for a set of `StateId`. |
 | `StateAnimatorBinding` | A component that drives the Animator on its GameObject from a list of bindings: at this moment of this `StateId`, set a trigger, a bool or an integer, or cross fade to a state. |
+| `StateAudioBinding` | A component that plays background music on one Audio Source, with crossfades, and moves an Audio Mixer to snapshots, from a list of bindings: at this moment of this `StateId`, play a clip, stop the music or transition to a snapshot. |
+| `StateInputBinding` | A component that enables and disables the action maps of an Input Action Asset with the states. Only with the Input System package. |
 | `StateChanged` | The signal of one transition: `From`, `To` and `Kind` (`StateChangeKind.Switch`, `Push` or `Pop`). |
 | `StateSubscription` | What `Subscribe` returns. `Status` is `StateListenerStatus.Inactive`, `Active` or `Paused`; `Dispose()` unsubscribes. |
 
@@ -312,18 +315,122 @@ is inactive.
 `StateInputBinding` enables and disables the action maps of one **Input Action Asset** of the Input System with the
 states of a host. It lives in its own assembly, `ALittleBB.StateMachines.InputSystem`, which compiles only when the
 project has the Input System package (`com.unity.inputsystem`); without it the rest of the package works and the
-component is simply not there.
+component is simply not there: it is missing from the **Add Component** menu.
 
-1. **Add Component > ALittleBB > State Machine > State Input Binding** on any GameObject.
-2. Set **Host** and **Actions** (the Input Action Asset).
-3. Add one entry per action map: **States** (the states during which the map is enabled), **Action Map** (its name in the asset) and **When Paused**.
+1. On any GameObject, **Add Component > ALittleBB > State Machine > State Input Binding**.
+2. **Host**: drag the host in. It must be set: unlike the other components, it is not looked up on the same GameObject or its parents.
+3. **Actions**: the Input Action Asset whose maps it drives.
+4. **Entries**: press **+** once per action map, and fill the entry in:
 
-What it does:
+| Field | What to set |
+|---|---|
+| **States** | The states during which the map is enabled. With more than one, the map stays enabled while the machine moves between them. |
+| **Action Map** | The name of the action map in the asset, as the Input Actions editor shows it. |
+| **When Paused** | What happens while the state is paused under a pushed state: *Disable Map* (the default) or *Keep Map Enabled*. |
 
-- The map of an entry is enabled as soon as one of its **States** becomes the current state, before `Switch`, `Push` or `Pop` returns, and disabled when none of them is on the stack any more.
-- Moving between two states of the same entry does not touch the map, so a key that is held across the change is not cancelled. List every state that shares a map in one entry.
-- Action maps that are in no entry are never touched; other code keeps control of them.
-- **When Paused** says what happens while the state is paused under a pushed state: *Disable Map* (the default) disables the map until a `Pop` resumes the state, *Keep Map Enabled* leaves it enabled.
+For example, with the maps `UI` and `Player` of one asset:
+
+| States | Action Map | When Paused |
+|---|---|---|
+| MainMenu, Pause | `UI` | Disable Map |
+| Gameplay | `Player` | Disable Map |
+
+### When a map is enabled
+
+The status of an entry follows the rule of [Active, paused and inactive](#active-paused-and-inactive) for its set
+of states, and the map is changed before `Switch`, `Push` or `Pop` returns, so code that runs right after the call
+already sees the new maps:
+
+| The states of the entry | Map |
+|---|---|
+| One of them becomes the current state (Enter) | Enabled. |
+| The current state moves to another state of the same entry | Not touched, so a key held across the change is not cancelled. |
+| A `Push` covers it (Paused) | *Disable Map*: disabled. *Keep Map Enabled*: stays enabled. |
+| The `Pop` of the state on top makes it current again (Resumed) | Enabled again. |
+| None of them is on the stack any more (Exit), paused or not | Disabled. |
+
+With the example above, `Push(Pause)` from Gameplay disables `Player` and enables `UI`; after the `Pop` back to Gameplay, `Player` is enabled again and `UI` is disabled.
+
+- List every state that shares a map in one entry. Two entries with the same map each enable and disable it on their own, so moving from a state of one to a state of the other disables the map and enables it again, which cancels a key that is held.
+- Action maps that are in no entry are never touched: their enabled state is whatever other code set.
+- Transitions requested during a transition are queued (see [Nested transitions are queued](#nested-transitions-are-queued)); once the queue is empty, the maps match the last state.
+
+### Enabled, disabled and destroyed
+
+- Each time the component is enabled (first activation, after `Instantiate`, or enabled again) it is synced with the stack: the maps of the entries that are active now are enabled, and every other map of its entries is disabled, whatever other code set before.
+- When the component is disabled or destroyed, every map of its entries is disabled. What happens while it is disabled is not applied, then or later.
+- **Host**, **Actions** and **Entries** are read each time the component is enabled. To change them from code, do it while it is disabled.
+- Wrong settings log a warning, once for each problem, and throw nothing: without **Host** or **Actions** no map is driven; an entry whose **Action Map** is not in the asset does nothing, and the other entries still work.
+
+## Play music with StateAudioBinding
+
+`StateAudioBinding` plays the background music (BGM) of the states of a host on one Audio Source, and can move an
+Audio Mixer to a snapshot, from the Inspector and without code. Like `StateAnimatorBinding`, it holds a list of
+bindings, and each one says: at this moment of this state, do this to the music.
+
+1. **Add Component > ALittleBB > State Machine > State Audio Binding** on any GameObject.
+2. **Host**: drag the host in. Leave it empty to use the `StateMachineHost` on the same GameObject or on its nearest parent.
+3. **Audio Source**: the Audio Source that plays the music. It must be set for **Play Bgm** and **Stop Bgm**. Its **Volume** is the volume of the music, and its **Output** is the mixer group the music goes to.
+4. **Bindings**: press **+** once for each thing to do, and fill the entry in:
+
+| Field | What to set |
+|---|---|
+| **State** | The `StateId` the binding reacts to. An entry without a state does nothing. |
+| **Moment** | When to act: **Enter**, **Exit**, **Paused** or **Resumed**, as for [StateAnimatorBinding](#drive-an-animator-with-stateanimatorbinding). |
+| **Action** | **Play Bgm**, **Stop Bgm** or **Transition To Snapshot** (table below). |
+| **Clip** | The clip for Play Bgm. |
+| **Snapshot** | The Audio Mixer snapshot for Transition To Snapshot. |
+| **Seconds** | The crossfade of Play Bgm, the fade out of Stop Bgm, or the length of Transition To Snapshot. 0 changes at once. |
+
+| Action | What it does |
+|---|---|
+| Play Bgm | Plays **Clip** looped on the Audio Source. When that clip is already playing, it goes on from where it is instead of starting again, so two states with the same music switch without a break. With **Seconds** > 0 it crossfades from the music that plays. |
+| Stop Bgm | Stops the music, fading it out first when **Seconds** > 0. |
+| Transition To Snapshot | Calls `TransitionTo(Seconds)` on **Snapshot**, which moves its Audio Mixer to that snapshot. It does not need the Audio Source. |
+
+For example, music for the menu and for gameplay, muffled while the pause popup is pushed on top:
+
+| State | Moment | Action | Clip / Snapshot | Seconds |
+|---|---|---|---|---|
+| MainMenu | Enter | Play Bgm | `MenuTheme` | 1 |
+| Gameplay | Enter | Play Bgm | `GameplayTheme` | 1 |
+| Gameplay | Paused | Transition To Snapshot | `Muffled` | 0.3 |
+| Gameplay | Resumed | Transition To Snapshot | `Normal` | 0.3 |
+| Gameplay | Exit | Transition To Snapshot | `Normal` | 0 |
+
+As in `StateAnimatorBinding`, the last entry is there because leaving while paused is Exit only. Within one
+transition every Exit and Paused action is applied before any Enter and Resumed action, whatever the order of the
+list; entries that share a state and a moment are applied in list order.
+
+### Crossfades run on real time and do not hold a transition
+
+- A crossfade fades the music that plays out while the new clip fades in up to the volume of the Audio Source, then only the new clip plays. The second clip plays on a second Audio Source that is added, hidden in the Inspector, on the GameObject of the Audio Source that is set. It copies that Audio Source's settings at the start of each fade: mixer group, spatial blend, priority, pitch, 3D settings and so on.
+- Fades run on unscaled time: they use real seconds and go on while `Time.timeScale` is 0, so music fades as expected on a pause screen that stops time.
+- `Switch`, `Push` and `Pop` do not wait for the fade. The transition is done and its signal is sent while the fade has just started.
+- A Play Bgm during a fade starts a new fade from where the volumes are, towards the newest clip. A Play Bgm or Stop Bgm with **Seconds** 0 ends the fade at once.
+
+### Snapshots follow the Audio Mixer's Update Mode
+
+Transition To Snapshot is the mixer's own transition, so it runs on the clock set by the **Update Mode** of the
+Audio Mixer asset, not on real time like the BGM fades. In **Normal**, the default, the transition stands still while `Time.timeScale` is 0;
+in **Unscaled Time** it does not. If the game sets `Time.timeScale` to 0 while paused, set the mixer's **Update Mode**
+to **Unscaled Time**, or a Paused binding that muffles the music does not get there until time runs again.
+A snapshot transition never holds a state change either, and a new one starts from where the mixer is.
+
+### Enabled, disabled and other scenes
+
+- Each time the component is enabled it is synced with the stack as if the states on it had been entered one by one, bottom first: the Enter actions of each state, then its Paused actions when it is covered, then the next state up. So the music of the current state wins, whatever the order of the list, and plays as soon as the component starts, even for the Initial State the host entered before. A clip that is already playing goes on.
+- What happens while it is disabled is not applied, then or later.
+- Disabling or destroying the component does not stop the music. A fade under way ends at once where it was going: the new clip at full volume, or silence for Stop Bgm.
+- **Host** and the states of **Bindings** are read each time the component is enabled. To change them from code, do it while it is disabled.
+- A binding without its Audio Source, Clip or Snapshot logs one warning the first time it is needed and does nothing; the other bindings still work. Without a host, the component logs one warning and plays nothing.
+
+The package does not keep the music across scenes. Loading another scene (not additively) destroys the Audio Source
+with the rest of the old scene, and the music stops. To keep the BGM playing, put the Audio Source on an object that is not destroyed, for
+example one you pass to `DontDestroyOnLoad`, yourself. Either keep the host and the `StateAudioBinding` on that object
+too, or, since a scene cannot reference that object in the Inspector, save the binding of the new scene disabled
+and give it the Audio Source from code before enabling it (`binding.AudioSource = music; binding.enabled = true;`). A Play Bgm of the clip that is already playing then goes on
+without a break.
 
 ## Nested transitions are queued
 

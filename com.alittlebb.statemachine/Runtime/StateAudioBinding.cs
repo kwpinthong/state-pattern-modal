@@ -66,7 +66,7 @@ namespace ALittleBB.StateMachines
             [Tooltip("Snapshot for Transition To Snapshot.")]
             [SerializeField] AudioMixerSnapshot _snapshot;
 
-            [Tooltip("Crossfade of Play Bgm, fade out of Stop Bgm, or length of Transition To Snapshot, in real seconds (Time.timeScale does not slow it). 0 changes at once.")]
+            [Tooltip("Crossfade of Play Bgm, fade out of Stop Bgm, or length of Transition To Snapshot, in seconds. Bgm fades use real time (Time.timeScale does not slow them); a snapshot transition follows the Audio Mixer's Update Mode. 0 changes at once.")]
             [SerializeField, Min(0f)] float _seconds;
 
             /// <summary>The state this binding reacts to. A binding without a state does nothing.</summary>
