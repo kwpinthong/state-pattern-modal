@@ -13,6 +13,9 @@ namespace ALittleBB.StateMachines
         readonly Dictionary<StateId, IState> _states = new Dictionary<StateId, IState>();
         readonly List<StateId> _stack = new List<StateId>();
         readonly IReadOnlyList<StateId> _readOnlyStack;
+        readonly List<StateSubscription> _subscriptions = new List<StateSubscription>();
+        int _sendDepth;
+        bool _hasDisposedSubscriptions;
 
         public StateMachine()
         {
@@ -31,6 +34,7 @@ namespace ALittleBB.StateMachines
         /// <summary>
         /// Raised for this machine's listeners only, once per transition, after every Exit and Enter
         /// of that transition has finished and <see cref="Current"/> is the new state.
+        /// Listeners added with <see cref="Subscribe"/> get their status callbacks before it.
         /// </summary>
         public event Action<StateChanged> Changed;
 
@@ -43,6 +47,38 @@ namespace ALittleBB.StateMachines
                 throw new ArgumentNullException(nameof(state));
 
             _states[id] = state;
+        }
+
+        /// <summary>
+        /// Subscribes a listener that should be active while the top of the stack is one of <paramref name="states"/>.
+        /// <para>Its status is active when the top of the stack is in the set, paused when a state of the set is on the
+        /// stack but the top is not, and inactive otherwise. After each transition: inactive → active calls
+        /// <paramref name="onEnter"/>, active → paused <paramref name="onPaused"/>, paused → active
+        /// <paramref name="onResumed"/>, and active or paused → inactive <paramref name="onExit"/>. Moving between
+        /// states of the set calls none of them.</para>
+        /// <para>Per transition, every listener that is paused or exited is told first, then every listener that is
+        /// entered or resumed, then <see cref="Changed"/> is raised and <paramref name="onChanged"/> is called for
+        /// every listener whatever its status — each step in subscribe order.</para>
+        /// <para>The listener is synced with the stack before this method returns: <paramref name="onEnter"/> is called
+        /// right away when a state of the set is already on the stack, followed by <paramref name="onPaused"/> when
+        /// that state is not the top.</para>
+        /// </summary>
+        /// <returns>The subscription; dispose it to unsubscribe.</returns>
+        public StateSubscription Subscribe(
+            IEnumerable<StateId> states,
+            Action onEnter = null,
+            Action onExit = null,
+            Action onPaused = null,
+            Action onResumed = null,
+            Action<StateChanged> onChanged = null)
+        {
+            if (states == null)
+                throw new ArgumentNullException(nameof(states));
+
+            var subscription = new StateSubscription(this, states, onEnter, onExit, onPaused, onResumed, onChanged);
+            _subscriptions.Add(subscription);
+            subscription.Arrive(_stack);
+            return subscription;
         }
 
         /// <summary>
@@ -65,7 +101,7 @@ namespace ALittleBB.StateMachines
                 ExitTop();
 
             EnterOnTop(id);
-            Changed?.Invoke(new StateChanged(from, id, StateChangeKind.Switch));
+            Send(new StateChanged(from, id, StateChangeKind.Switch));
         }
 
         /// <summary>
@@ -88,7 +124,7 @@ namespace ALittleBB.StateMachines
 
             StateId from = Current;
             EnterOnTop(id);
-            Changed?.Invoke(new StateChanged(from, id, StateChangeKind.Push));
+            Send(new StateChanged(from, id, StateChangeKind.Push));
         }
 
         /// <summary>
@@ -111,7 +147,46 @@ namespace ALittleBB.StateMachines
 
             StateId from = Current;
             ExitTop();
-            Changed?.Invoke(new StateChanged(from, Current, StateChangeKind.Pop));
+            Send(new StateChanged(from, Current, StateChangeKind.Pop));
+        }
+
+        void Send(StateChanged signal)
+        {
+            // Listeners subscribed while this signal is being delivered already synced with the new stack.
+            int count = _subscriptions.Count;
+            _sendDepth++;
+            try
+            {
+                for (int i = 0; i < count; i++)
+                    _subscriptions[i].Leave(_stack);
+
+                for (int i = 0; i < count; i++)
+                    _subscriptions[i].Arrive(_stack);
+
+                Changed?.Invoke(signal);
+
+                for (int i = 0; i < count; i++)
+                    _subscriptions[i].SendChanged(signal);
+            }
+            finally
+            {
+                _sendDepth--;
+                if (_sendDepth == 0 && _hasDisposedSubscriptions)
+                {
+                    _hasDisposedSubscriptions = false;
+                    _subscriptions.RemoveAll(subscription => subscription.IsDisposed);
+                }
+            }
+        }
+
+        /// <summary>Called by <see cref="StateSubscription.Dispose"/>.</summary>
+        internal void Remove(StateSubscription subscription)
+        {
+            // The list must keep its indexes while Send walks it; the disposed one is skipped until then.
+            if (_sendDepth > 0)
+                _hasDisposedSubscriptions = true;
+            else
+                _subscriptions.Remove(subscription);
         }
 
         void EnterOnTop(StateId id)
