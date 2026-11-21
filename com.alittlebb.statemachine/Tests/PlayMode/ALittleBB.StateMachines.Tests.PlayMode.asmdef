@@ -3,7 +3,8 @@
     "rootNamespace": "ALittleBB.StateMachines.Tests",
     "references": [
         "ALittleBB.StateMachines",
-        "UnityEngine.TestRunner"
+        "UnityEngine.TestRunner",
+        "UnityEngine.UI"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
