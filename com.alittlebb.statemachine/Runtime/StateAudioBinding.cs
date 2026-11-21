@@ -18,12 +18,22 @@ namespace ALittleBB.StateMachines
     /// <para>Play BGM plays the clip looped on <see cref="AudioSource"/>, at the volume set on that Audio Source.
     /// When that clip is already playing there, it goes on from where it is: two states with the same music can
     /// switch back and forth without a break. Stop BGM stops it.</para>
+    /// <para>With Seconds &gt; 0, Play BGM crossfades: the music that plays fades out while the new clip fades in up
+    /// to the volume set on the Audio Source, then only the new clip plays. The second clip plays on a second Audio
+    /// Source that is added next to the one that is set (on its GameObject, hidden in the Inspector) and copies its
+    /// settings, mixer group included. Stop BGM with Seconds &gt; 0 fades the music out, then stops it. Fades run on
+    /// unscaled time, so they go on while Time.timeScale is 0, and a transition never waits for them: Switch returns
+    /// and the signal is sent while the fade has just started. A Play BGM during a fade starts a new fade from where
+    /// the volumes are, towards the newest clip (a clip that is still playing, even fading out, goes on from where it
+    /// is). Play BGM or Stop BGM with Seconds 0 during a fade ends it at once.</para>
     /// <para>Lifetime: it follows the host while it is enabled on an active GameObject, from OnEnable to OnDisable.
     /// Each time it is enabled it is synced with the stack as if the states on it had been entered one by one, bottom
     /// first: the Enter actions of each state, with the Paused actions of a state applied before the Enter actions of
     /// the state above it. So the music of the current state plays as soon as the component starts, even when its
     /// state was entered before (the Initial State of the host). A clip that is already playing goes on. What happens
-    /// while it is disabled is not applied, then or later. Disabling or destroying it does not stop the music.</para>
+    /// while it is disabled is not applied, then or later. Disabling or destroying it does not stop the music: a
+    /// fade under way ends at once where it was going (the new clip at full volume, or silence for Stop BGM). The
+    /// package does not keep the music across scenes; an Audio Source that must, is the game's to keep.</para>
     /// <para>A binding without its Audio Source, Clip or Snapshot logs one warning the first time it is needed and
     /// does nothing; the other bindings still work. Without a host, one warning is logged and nothing is played.</para>
     /// <para><see cref="Host"/> and the states of <see cref="Bindings"/> are read each time the component is
@@ -51,7 +61,7 @@ namespace ALittleBB.StateMachines
             [Tooltip("Snapshot for Transition To Snapshot.")]
             [SerializeField] AudioMixerSnapshot _snapshot;
 
-            [Tooltip("Fade of Play Bgm and Stop Bgm, or length of Transition To Snapshot, in seconds. 0 changes at once.")]
+            [Tooltip("Crossfade of Play Bgm, fade out of Stop Bgm, or length of Transition To Snapshot, in real seconds (Time.timeScale does not slow it). 0 changes at once.")]
             [SerializeField, Min(0f)] float _seconds;
 
             /// <summary>The state this binding reacts to. A binding without a state does nothing.</summary>
@@ -116,6 +126,7 @@ namespace ALittleBB.StateMachines
         readonly List<(StateId state, StateMoment moment)> _sync = new List<(StateId, StateMoment)>();
         bool _syncing;
         bool _noHostLogged;
+        StateAudioBgmPlayer _player;
 
         /// <summary>
         /// Host whose machine drives the music, as set in the Inspector. When it is null, the host on this
@@ -187,6 +198,10 @@ namespace ALittleBB.StateMachines
 
             _subscriptions.Clear();
             _sync.Clear();
+
+            // The music goes on; a fade under way ends at once where it was going (no clip left half loud).
+            if (_player != null)
+                _player.Finish();
         }
 
         void OnMoment(StateId state, StateMoment moment)
@@ -284,25 +299,26 @@ namespace ALittleBB.StateMachines
             }
         }
 
+        /// <summary>The player of <see cref="AudioSource"/>, which must not be null.</summary>
+        StateAudioBgmPlayer Player
+        {
+            get
+            {
+                if (_player == null || !_player.Plays(_audioSource))
+                    _player = StateAudioBgmPlayer.For(_audioSource);
+
+                return _player;
+            }
+        }
+
         /// <summary>
-        /// Plays <paramref name="clip"/> looped, or lets it go on when it is already playing.
-        /// The fade is not done yet: any <paramref name="fadeSeconds"/> changes the music at once.
+        /// Plays <paramref name="clip"/> looped, or lets it go on when it is already playing; crossfades over
+        /// <paramref name="fadeSeconds"/> when that is &gt; 0.
         /// </summary>
-        void PlayBgm(AudioClip clip, float fadeSeconds)
-        {
-            _audioSource.loop = true;
-            if (_audioSource.clip == clip && _audioSource.isPlaying)
-                return;
+        void PlayBgm(AudioClip clip, float fadeSeconds) => Player.Play(clip, fadeSeconds);
 
-            _audioSource.clip = clip;
-            _audioSource.Play();
-        }
-
-        /// <summary>Stops the music. The fade is not done yet: any <paramref name="fadeSeconds"/> stops it at once.</summary>
-        void StopBgm(float fadeSeconds)
-        {
-            _audioSource.Stop();
-        }
+        /// <summary>Stops the music, fading it out over <paramref name="fadeSeconds"/> when that is &gt; 0.</summary>
+        void StopBgm(float fadeSeconds) => Player.Stop(fadeSeconds);
 
         void WarnOnce(Entry entry, int index, string problem)
         {
